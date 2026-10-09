@@ -1,0 +1,52 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: Outfit, ui-sans-serif, system-ui, sans-serif;
+  background:
+    radial-gradient(900px 480px at 0% -10%, rgba(227, 83, 63, 0.35), transparent 55%),
+    radial-gradient(800px 420px at 100% 0%, rgba(15, 143, 134, 0.28), transparent 50%),
+    #16111f;
+  color: #f6f0e6;
+}
+
+button, input, select, textarea {
+  font: inherit;
+}
+
+:focus-visible {
+  outline: 3px solid #e2a52b;
+  outline-offset: 2px;
+}
+
+.paper {
+  background: #fffaf3;
+  color: #24182f;
+}
+
+.field {
+  @apply w-full rounded-2xl border border-black/10 bg-white px-4 py-3 text-ink shadow-sm;
+}
+
+.btn {
+  @apply inline-flex items-center justify-center rounded-full px-5 py-3 font-semibold transition disabled:cursor-not-allowed disabled:opacity-50;
+}
+
+.btn-primary {
+  @apply btn bg-coral text-white hover:brightness-110;
+}
+
+.btn-secondary {
+  @apply btn bg-teal text-white hover:brightness-110;
+}
+
+.btn-ghost {
+  @apply btn bg-ink/5 text-ink hover:bg-ink/10;
+}

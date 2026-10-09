@@ -1,0 +1,25 @@
+{
+  "measured": true,
+  "recordedAt": "2026-10-09",
+  "node": "v24.11.0",
+  "npm": "11.6.1",
+  "command": "npm run load-test",
+  "conditions": "One local process on 127.0.0.1. Four rooms created sequentially. Each room has three sockets. The host selects a word, then sends 20 draw:chunk events one at a time and waits for each acknowledgement. This is an acknowledgement round-trip sample, not a saturation or multi-machine ceiling.",
+  "rooms": 4,
+  "playersPerRoom": 3,
+  "strokesPerRoom": 20,
+  "drawEvents": 80,
+  "errors": 0,
+  "elapsedMs": 75,
+  "throughputPerSecond": 1073.57,
+  "latencyMs": {
+    "p50": 0,
+    "p95": 0,
+    "max": 1
+  },
+  "cpuMs": {
+    "user": 88,
+    "system": 10
+  },
+  "rssMb": 149.2
+}

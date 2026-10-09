@@ -1,0 +1,25 @@
+{
+  "name": "drawguess-realtime",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Real-time multiplayer drawing and guessing game",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "npm run build -w @drawguess/shared && concurrently -n shared,server,web -c magenta,blue,green \"npm run dev -w @drawguess/shared\" \"npm run dev -w @drawguess/server\" \"npm run dev -w @drawguess/web\"",
+    "build": "npm run build -w @drawguess/shared && npm run build -w @drawguess/server && npm run build -w @drawguess/web",
+    "start": "NODE_ENV=production node apps/server/dist/index.js",
+    "test": "npm run build -w @drawguess/shared && npm run test --workspaces --if-present",
+    "typecheck": "npm run build -w @drawguess/shared && npm run typecheck --workspaces --if-present",
+    "load-test": "npm run build -w @drawguess/shared && tsx apps/server/src/load/run.ts"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "tsx": "^4.20.3"
+  }
+}
