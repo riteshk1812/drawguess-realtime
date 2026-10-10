@@ -1,8 +1,18 @@
 import { CANVAS, applyChunkToScene, type Point, type SceneItem } from '@drawguess/shared'
 import { useEffect, useRef } from 'react'
 import { sendStroke } from '../../services/socket'
-import { useGameStore } from '../../stores/gameStore'
-import { blit } from './blit'
+import { applyLocalScene, store } from '../../stores/gameStore'
+import { blit, inkContext } from './blit'
+
+const NETWORK_MS = 50
+
+interface LiveStroke {
+  opId: string
+  points: Point[]
+  color: string
+  size: number
+  tool: 'pen' | 'eraser'
+}
 
 export function DrawCanvas({
   scene,
@@ -20,40 +30,89 @@ export function DrawCanvas({
   tool: 'pen' | 'eraser' | 'fill'
 }) {
   const ref = useRef<HTMLCanvasElement>(null)
-  const active = useRef<{ opId: string; points: Point[] } | null>(null)
-  const flushTimer = useRef<number | null>(null)
+  const active = useRef<LiveStroke | null>(null)
+  const sendTimer = useRef<number | null>(null)
+  const turnRef = useRef(turnId)
+  turnRef.current = turnId
 
   useEffect(() => {
+    if (!enabled) active.current = null
+    if (active.current) return
     if (ref.current) blit(ref.current, scene)
-  }, [scene])
+  }, [scene, enabled])
 
-  function paint(chunk: { opId: string; points: Point[]; done: boolean }) {
-    const room = useGameStore.getState().room
-    if (!room) return
-    const next = applyChunkToScene(room.scene, { opId: chunk.opId, tool, color, size, points: chunk.points, done: chunk.done }).scene
-    useGameStore.getState().applyLocalScene(next)
-    if (!turnId) return
+  function publish(done: boolean) {
+    const current = active.current
+    const currentTurn = turnRef.current
+    if (!current || !currentTurn) return
     sendStroke({
-      turnId,
-      opId: chunk.opId,
+      turnId: currentTurn,
+      opId: current.opId,
       chunkId: crypto.randomUUID().replace(/-/g, '').slice(0, 24),
-      tool,
-      color,
-      size,
-      points: chunk.points,
-      done: chunk.done,
+      tool: current.tool,
+      color: current.color,
+      size: current.size,
+      points: current.points.map((point) => ({ x: point.x, y: point.y })),
+      done,
     })
   }
 
-  function schedule(done: boolean) {
-    if (flushTimer.current) window.clearTimeout(flushTimer.current)
-    const send = () => {
-      const current = active.current
-      if (!current || current.points.length === 0) return
-      paint({ ...current, done })
+  function queueSend(done: boolean) {
+    if (done) {
+      if (sendTimer.current) window.clearTimeout(sendTimer.current)
+      sendTimer.current = null
+      publish(true)
+      return
     }
-    if (done) send()
-    else flushTimer.current = window.setTimeout(send, 40)
+    if (sendTimer.current) return
+    sendTimer.current = window.setTimeout(() => {
+      sendTimer.current = null
+      publish(false)
+    }, NETWORK_MS)
+  }
+
+  function commit(done: boolean) {
+    const current = active.current
+    const room = store.getState().game.room
+    if (!current || !room) return
+    const next = applyChunkToScene(room.scene, {
+      opId: current.opId,
+      tool: current.tool,
+      color: current.color,
+      size: current.size,
+      points: current.points.map((point) => ({ x: point.x, y: point.y })),
+      done,
+    }).scene
+    store.dispatch(applyLocalScene(next))
+  }
+
+  function remember(canvas: HTMLCanvasElement, stroke: LiveStroke, point: Point) {
+    const previous = stroke.points[stroke.points.length - 1]
+    if (previous && previous.x === point.x && previous.y === point.y) return
+    stroke.points.push(point)
+    drawMark(canvas, previous ?? null, point, stroke)
+    if (stroke.points.length >= 500 && previous) {
+      queueSend(true)
+      commit(true)
+      active.current = {
+        opId: createOpId(),
+        points: [point],
+        color: stroke.color,
+        size: stroke.size,
+        tool: stroke.tool,
+      }
+      return
+    }
+    queueSend(false)
+  }
+
+  function finish(canvas: HTMLCanvasElement, event: { clientX: number; clientY: number }) {
+    if (!active.current) return
+    remember(canvas, active.current, toPoint(canvas, event))
+    if (!active.current) return
+    queueSend(true)
+    commit(true)
+    active.current = null
   }
 
   return (
@@ -64,34 +123,71 @@ export function DrawCanvas({
       className="aspect-[8/5] w-full touch-none rounded-2xl bg-white"
       aria-label="Drawing canvas"
       onPointerDown={(event) => {
-        if (!enabled) return
+        if (!enabled || event.button !== 0) return
         const point = toPoint(event.currentTarget, event)
         if (tool === 'fill') {
-          paint({ opId: createOpId(), points: [point], done: true })
+          const room = store.getState().game.room
+          if (!room || !turnId) return
+          const opId = createOpId()
+          const next = applyChunkToScene(room.scene, { opId, tool, color, size, points: [point], done: true }).scene
+          store.dispatch(applyLocalScene(next))
+          sendStroke({
+            turnId,
+            opId,
+            chunkId: crypto.randomUUID().replace(/-/g, '').slice(0, 24),
+            tool,
+            color,
+            size,
+            points: [point],
+            done: true,
+          })
           return
         }
-        event.currentTarget.setPointerCapture(event.pointerId)
-        active.current = { opId: createOpId(), points: [point] }
-        schedule(false)
+        try {
+          event.currentTarget.setPointerCapture(event.pointerId)
+        } catch {
+          // Drawing continues from pointer events when capture is unavailable.
+        }
+        const stroke: LiveStroke = { opId: createOpId(), points: [], color, size, tool }
+        active.current = stroke
+        remember(event.currentTarget, stroke, point)
       }}
       onPointerMove={(event) => {
         if (!active.current || !enabled) return
-        active.current.points.push(toPoint(event.currentTarget, event))
-        if (active.current.points.length >= 500) {
-          const finished = active.current
-          active.current = { opId: createOpId(), points: [finished.points[finished.points.length - 1] ?? toPoint(event.currentTarget, event)] }
-          paint({ ...finished, done: true })
-          return
+        const native = event.nativeEvent
+        const coalesced = typeof native.getCoalescedEvents === 'function' ? native.getCoalescedEvents() : []
+        const samples = coalesced.length > 0 ? coalesced : [native]
+        for (const sample of samples) {
+          const current = active.current
+          if (!current) return
+          remember(event.currentTarget, current, toPoint(event.currentTarget, sample))
         }
-        schedule(false)
       }}
-      onPointerUp={() => {
-        if (!active.current) return
-        schedule(true)
-        active.current = null
-      }}
+      onPointerUp={(event) => finish(event.currentTarget, event)}
+      onPointerCancel={(event) => finish(event.currentTarget, event)}
     />
   )
+}
+
+function drawMark(canvas: HTMLCanvasElement, from: Point | null, to: Point, stroke: LiveStroke): void {
+  const context = inkContext(canvas)
+  if (!context) return
+  const ink = stroke.tool === 'eraser' ? '#ffffff' : stroke.color
+  context.lineCap = 'round'
+  context.lineJoin = 'round'
+  context.strokeStyle = ink
+  context.fillStyle = ink
+  context.lineWidth = Math.max(1, stroke.size)
+  if (!from) {
+    context.beginPath()
+    context.arc(to.x, to.y, Math.max(0.5, stroke.size / 2), 0, Math.PI * 2)
+    context.fill()
+    return
+  }
+  context.beginPath()
+  context.moveTo(from.x, from.y)
+  context.lineTo(to.x, to.y)
+  context.stroke()
 }
 
 function toPoint(canvas: HTMLCanvasElement, event: { clientX: number; clientY: number }): Point {

@@ -1,4 +1,5 @@
 import type { PublicRoomState } from '@drawguess/shared'
+import { KickPoll } from '../players/KickPoll'
 
 export function LobbyView({
   room,
@@ -7,6 +8,10 @@ export function LobbyView({
   onStart,
   onCopy,
   copied,
+  selfId = null,
+  kickVote = null,
+  onKick,
+  onVote,
 }: {
   room: PublicRoomState
   isHost: boolean
@@ -14,6 +19,10 @@ export function LobbyView({
   onStart: () => void
   onCopy: () => void
   copied: boolean
+  selfId?: string | null
+  kickVote?: 'yes' | 'no' | null
+  onKick?: (playerId: string) => void
+  onVote?: (yes: boolean) => void
 }) {
   const link = `${window.location.origin}/room/${room.code}`
   return (
@@ -46,19 +55,37 @@ export function LobbyView({
             <span className="font-semibold">
               {player.name} {player.isHost ? '· host' : ''}
             </span>
-            <span className={player.connected ? 'text-teal' : 'text-coral'}>{player.connected ? 'Connected' : 'Reconnecting'}</span>
+            <span className="flex items-center gap-2">
+              {onKick && selfId && player.id !== selfId && !player.isDrawer && !room.kick ? (
+                <button type="button" className="btn-ghost" onClick={() => onKick(player.id)}>Kick {player.name}</button>
+              ) : null}
+              <span className={player.connected ? 'text-teal' : 'text-coral'}>{player.connected ? 'Connected' : 'Reconnecting'}</span>
+            </span>
           </li>
         ))}
       </ul>
+      {room.kick && onVote ? (
+        <KickPoll
+          kick={room.kick}
+          serverNow={room.serverNow}
+          canVote={Boolean(selfId && selfId !== room.kick.targetId && kickVote === null)}
+          isTarget={selfId === room.kick.targetId}
+          onVote={onVote}
+        />
+      ) : null}
       {isHost ? (
         <button className="btn-primary" type="button" onClick={onStart} disabled={!canStart}>
-          {canStart ? 'Start game' : 'Waiting for at least two players'}
+          {canStart ? 'Start game' : waitingLabel(room.settings.capacity)}
         </button>
       ) : (
         <p className="rounded-2xl bg-cream px-4 py-3 text-ink/70">Waiting for the host to start.</p>
       )}
     </section>
   )
+}
+
+function waitingLabel(capacity: number): string {
+  return capacity >= 3 ? 'Waiting for at least 2 players' : 'Waiting for at least 1 players'
 }
 
 function Stat({ label, value }: { label: string; value: string }) {

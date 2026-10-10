@@ -1,6 +1,6 @@
 import type { DrawChunkInput, PrivateView, PublicRoomState } from '@drawguess/shared'
 import { io, type Socket } from 'socket.io-client'
-import { useGameStore } from '../stores/gameStore'
+import { applyPrivate, applyServerState, resetRoom, setConnection, setError, store } from '../stores/gameStore'
 import { clearSession, loadSession, saveSession, type SavedSession } from './session'
 
 export interface Ack {
@@ -33,7 +33,7 @@ let pendingStroke: DrawChunkInput | null = null
 export function ensureConnected(): void {
   wire()
   if (!socket.connected) {
-    useGameStore.getState().setConnection('connecting')
+    store.dispatch(setConnection('connecting'))
     socket.connect()
   }
 }
@@ -64,7 +64,7 @@ export async function reconnect(session = loadSession()): Promise<Ack> {
   const ack = await emit<Ack>('room:reconnect', session)
   if (!ack.ok) {
     clearSession()
-    useGameStore.getState().setError(ack.error ?? 'Could not reconnect')
+    store.dispatch(setError(ack.error ?? 'Could not reconnect'))
     return ack
   }
   return accept(ack, session.playerName)
@@ -98,6 +98,32 @@ export async function returnToLobby(): Promise<Ack> {
   return take(await emit<Ack>('room:lobby', {}))
 }
 
+export async function endGame(): Promise<Ack> {
+  return take(await emit<Ack>('game:end', {}))
+}
+
+export async function leaveRoom(): Promise<Ack> {
+  ensureConnected()
+  await waitForConnect()
+  const ack = await emit<Ack>('room:leave', {})
+  if (!ack.ok) {
+    store.dispatch(setError(ack.error ?? 'Could not leave the game'))
+    return ack
+  }
+  clearSession()
+  watchedCode = null
+  store.dispatch(resetRoom())
+  return ack
+}
+
+export async function startKick(targetId: string): Promise<Ack> {
+  return take(await emit<Ack>('kick:start', { targetId }))
+}
+
+export async function voteKick(yes: boolean): Promise<Ack> {
+  return take(await emit<Ack>('kick:vote', { yes }))
+}
+
 export async function requestSync(): Promise<Ack> {
   return take(await emit<Ack>('sync:request', {}))
 }
@@ -126,10 +152,9 @@ function accept(ack: Ack, playerName: string): Ack {
 }
 
 function take(ack: Ack): Ack {
-  const store = useGameStore.getState()
-  if (ack.state) store.applyServerState(ack.state)
-  if (ack.me) store.applyPrivate(ack.me)
-  if (!ack.ok) store.setError(ack.error ?? 'Request failed')
+  if (ack.state) store.dispatch(applyServerState(ack.state))
+  if (ack.me) store.dispatch(applyPrivate(ack.me))
+  if (!ack.ok) store.dispatch(setError(ack.error ?? 'Request failed'))
   return ack
 }
 
@@ -137,22 +162,27 @@ function wire(): void {
   if (wired) return
   wired = true
   socket.on('connect', () => {
-    useGameStore.getState().setConnection('connected')
+    store.dispatch(setConnection('connected'))
     const session = loadSession()
     if (session && watchedCode && session.code === watchedCode) void reconnect(session)
   })
-  socket.on('disconnect', () => useGameStore.getState().setConnection('disconnected'))
-  socket.on('connect_error', () => useGameStore.getState().setConnection('disconnected'))
-  socket.on('room:state', (state: PublicRoomState) => useGameStore.getState().applyServerState(state))
-  socket.on('player:private', (me: PrivateView) => useGameStore.getState().applyPrivate(me))
+  socket.on('disconnect', () => store.dispatch(setConnection('disconnected')))
+  socket.on('connect_error', () => store.dispatch(setConnection('disconnected')))
+  socket.on('room:state', (state: PublicRoomState) => store.dispatch(applyServerState(state)))
+  socket.on('player:private', (me: PrivateView) => store.dispatch(applyPrivate(me)))
   socket.on('session:replaced', (payload: { error?: string }) => {
     clearSession()
-    useGameStore.getState().resetRoom()
-    useGameStore.getState().setError(payload.error ?? 'Connected somewhere else')
+    store.dispatch(resetRoom())
+    store.dispatch(setError(payload.error ?? 'Connected somewhere else'))
+  })
+  socket.on('room:kicked', (payload: { error?: string }) => {
+    clearSession()
+    store.dispatch(resetRoom())
+    store.dispatch(setError(payload.error ?? 'You were kicked from the room'))
   })
   socket.on('server:shutdown', () => {
-    useGameStore.getState().setError('The server is shutting down. Rejoin in a moment.')
-    useGameStore.getState().setConnection('disconnected')
+    store.dispatch(setError('The server is shutting down. Rejoin in a moment.'))
+    store.dispatch(setConnection('disconnected'))
   })
 }
 

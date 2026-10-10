@@ -37,23 +37,24 @@ export function applyChunkToScene(scene: SceneItem[], chunk: StrokeChunk): {
   }
   const tool = chunk.tool === 'eraser' ? 'eraser' : 'pen'
   const index = findStrokeIndex(scene, chunk.opId)
+  const points = chunk.points.slice()
   if (index === -1) {
     return {
       changed: true,
-      delta: chunk.points,
-      scene: [...scene, { kind: 'stroke', opId: chunk.opId, tool, color, size: chunk.size, points: chunk.points, done: Boolean(chunk.done) }],
+      delta: points,
+      scene: [...scene, { kind: 'stroke', opId: chunk.opId, tool, color, size: chunk.size, points, done: Boolean(chunk.done) }],
     }
   }
   const current = scene[index]
   if (!current || current.kind !== 'stroke') return { scene, changed: false, delta: [] }
-  if (chunk.points.length < current.points.length) return { scene, changed: false, delta: [] }
+  if (points.length < current.points.length) return { scene, changed: false, delta: [] }
   const done = current.done || Boolean(chunk.done)
-  if (chunk.points.length === current.points.length && done === current.done) {
+  if (points.length === current.points.length && done === current.done) {
     return { scene, changed: false, delta: [] }
   }
   const next = scene.slice()
-  next[index] = { ...current, points: chunk.points, done, color, size: chunk.size, tool }
-  return { scene: next, changed: true, delta: chunk.points.slice(current.points.length) }
+  next[index] = { ...current, points, done, color, size: chunk.size, tool }
+  return { scene: next, changed: true, delta: points.slice(current.points.length) }
 }
 
 export function undoScene(scene: SceneItem[]): SceneItem[] | null {

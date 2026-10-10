@@ -157,6 +157,70 @@ describe('game room', () => {
     expect(room.start(bea.playerId, now()).ok).toBe(true)
   })
 
+  it('ends the game for everyone and kicks a non-drawer only when the vote wins', () => {
+    const { room, hostId, now, add } = setup()
+    const bea = add('Bea')
+    const cy = add('Cy')
+    expect(room.endGame(hostId, now()).ok).toBe(false)
+    expect(room.start(hostId, now()).ok).toBe(true)
+    expect(room.startKick(bea.playerId, hostId, now()).ok).toBe(false)
+
+    const opened = room.startKick(bea.playerId, cy.playerId, now())
+    expect(opened.ok && opened.data.kickedId).toBeNull()
+    expect(room.toPublicState(now()).kick?.yes).toBe(1)
+    expect(room.toPrivateState(bea.playerId).kickVote).toBe('yes')
+
+    const tied = room.voteKick(hostId, false, now())
+    expect(tied.ok && tied.data.kickedId).toBeNull()
+    expect(room.toPublicState(now()).kick).toBeNull()
+    expect(room.toPublicState(now()).players.some((player) => player.id === cy.playerId)).toBe(true)
+
+    expect(room.startKick(hostId, cy.playerId, now()).ok).toBe(true)
+    const passed = room.voteKick(bea.playerId, true, now())
+    expect(passed.ok && passed.data.kickedId).toBe(cy.playerId)
+    expect(room.toPublicState(now()).players.some((player) => player.id === cy.playerId)).toBe(false)
+    expect(room.reconnect(cy.playerId, 'not-a-valid-token-value-here', now()).ok).toBe(false)
+
+    const secret = room.toPrivateState(hostId).wordChoices?.[0]?.word ?? 'pineapple'
+    expect(room.selectWord(hostId, room.turnId ?? '', secret, now()).ok).toBe(true)
+    expect(room.toPrivateState(bea.playerId).canEndGame).toBe(false)
+    expect(room.endGame(bea.playerId, now()).ok).toBe(false)
+    expect(room.toPrivateState(hostId).canEndGame).toBe(true)
+    expect(room.endGame(hostId, now()).ok).toBe(true)
+    const finished = room.toPublicState(now())
+    expect(finished.phase).toBe('GAME_RESULTS')
+    expect(JSON.stringify(finished)).not.toContain(secret)
+
+    const again = setup()
+    const dee = again.add('Dee')
+    const eve = again.add('Eve')
+    again.add('Fay')
+    expect(again.room.start(again.hostId, again.now()).ok).toBe(true)
+    expect(again.room.startKick(dee.playerId, eve.playerId, again.now()).ok).toBe(true)
+    again.setNow(again.now() + 20_000)
+    expect(again.room.catchUp(again.now())).toBeGreaterThan(0)
+    expect(again.room.toPublicState(again.now()).kick).toBeNull()
+    expect(again.room.toPublicState(again.now()).players.some((player) => player.id === eve.playerId)).toBe(true)
+    expect(again.room.drainKicked()).toEqual([])
+  })
+
+  it('removes a player who leaves and skips the turn when the drawer leaves', () => {
+    const { room, hostId, now, add } = setup()
+    const bea = add('Bea')
+    const cy = add('Cy')
+    expect(room.start(hostId, now()).ok).toBe(true)
+    expect(room.leave(bea.playerId, now()).ok).toBe(true)
+    expect(room.toPublicState(now()).phase).toBe('WORD_SELECTION')
+    expect(room.toPublicState(now()).players.map((player) => player.name).sort()).toEqual(['Ada', 'Cy'])
+    expect(room.reconnect(bea.playerId, bea.reconnectToken, now()).ok).toBe(false)
+
+    expect(room.leave(hostId, now()).ok).toBe(true)
+    const afterDrawer = room.toPublicState(now())
+    expect(afterDrawer.players.map((player) => player.id)).toEqual([cy.playerId])
+    expect(afterDrawer.phase).toBe('WAITING')
+    expect(afterDrawer.hostId).toBe(cy.playerId)
+  })
+
   it('round-trips a snapshot without trusting a stale turn', () => {
     const { room, hostId, now, add } = setup()
     const bea = add('Bea')

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { normalizePlayerName } from '@drawguess/shared'
 import { ConnectionBanner } from '../components/ConnectionBanner'
 import { HintWord } from '../components/HintWord'
@@ -10,20 +10,21 @@ import { ReplayPlayer } from '../features/drawing/ReplayPlayer'
 import { Toolbar } from '../features/drawing/Toolbar'
 import { Leaderboard } from '../features/leaderboard/Leaderboard'
 import { LobbyView } from '../features/lobby/LobbyView'
-import { clearDraw, joinRoom, returnToLobby, selectWord, sendText, startGame, undoDraw, watchRoom } from '../services/socket'
+import { KickPoll } from '../features/players/KickPoll'
+import { clearDraw, endGame, joinRoom, leaveRoom, returnToLobby, selectWord, sendText, startGame, startKick, undoDraw, voteKick, watchRoom } from '../services/socket'
 import { loadSession } from '../services/session'
-import { useGameStore } from '../stores/gameStore'
+import { setError, setPlayerName, useAppDispatch, useAppSelector } from '../stores/gameStore'
 
 export function RoomPage() {
+  const navigate = useNavigate()
   const params = useParams()
   const code = (params.code ?? '').toUpperCase()
-  const room = useGameStore((state) => state.room)
-  const me = useGameStore((state) => state.me)
-  const connection = useGameStore((state) => state.connection)
-  const error = useGameStore((state) => state.error)
-  const playerName = useGameStore((state) => state.playerName)
-  const setPlayerName = useGameStore((state) => state.setPlayerName)
-  const setError = useGameStore((state) => state.setError)
+  const dispatch = useAppDispatch()
+  const room = useAppSelector((state) => state.game.room)
+  const me = useAppSelector((state) => state.game.me)
+  const connection = useAppSelector((state) => state.game.connection)
+  const error = useAppSelector((state) => state.game.error)
+  const playerName = useAppSelector((state) => state.game.playerName)
   const [copied, setCopied] = useState(false)
   const [color, setColor] = useState('#1c1917')
   const [size, setSize] = useState(10)
@@ -56,7 +57,23 @@ export function RoomPage() {
     <main className="mx-auto grid max-w-7xl gap-4 px-3 py-4 md:px-4">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <Link to="/" className="font-display text-3xl">DrawGuess</Link>
-        <p className="text-sm text-cream/70">{connection === 'connected' ? 'Connected' : 'Offline'}</p>
+        <div className="flex items-center gap-3">
+          {inThisRoom || restoring ? (
+            <button
+              type="button"
+              className="rounded-full bg-white/10 px-4 py-2 text-sm font-semibold text-cream"
+              onClick={() => {
+                if (!window.confirm('Leave the game?')) return
+                void leaveRoom().then((ack) => {
+                  if (ack.ok) navigate('/')
+                })
+              }}
+            >
+              Leave
+            </button>
+          ) : null}
+          <p className="text-sm text-cream/70">{connection === 'connected' ? 'Connected' : 'Offline'}</p>
+        </div>
       </header>
       <ConnectionBanner connection={connection} error={error} />
       {restoring ? <p className="paper rounded-[2rem] p-6 text-ink" role="status">Restoring your seat…</p> : null}
@@ -71,7 +88,7 @@ export function RoomPage() {
               return
             }
             setJoining(true)
-            setPlayerName(name)
+            dispatch(setPlayerName(name))
             void joinRoom({ code, playerName: name })
               .then((ack) => setJoinError(ack.ok ? null : ack.error ?? 'Could not join'))
               .catch((reason: unknown) => setJoinError(reason instanceof Error ? reason.message : 'Could not join'))
@@ -80,7 +97,7 @@ export function RoomPage() {
         >
           <h1 className="font-display text-4xl text-ink">Join {code}</h1>
           <label className="grid gap-2 text-sm font-semibold" htmlFor="join-name">Your name
-            <input id="join-name" className="field" value={playerName} maxLength={16} onChange={(event) => setPlayerName(event.target.value)} />
+            <input id="join-name" className="field" value={playerName} maxLength={16} onChange={(event) => dispatch(setPlayerName(event.target.value))} />
           </label>
           {joinError ? <p role="alert" className="font-semibold text-coral">{joinError}</p> : null}
           <button className="btn-primary" type="submit" disabled={joining}>{joining ? 'Joining…' : 'Join room'}</button>
@@ -99,6 +116,10 @@ export function RoomPage() {
             })
           }}
           onStart={() => void startGame()}
+          selfId={me?.playerId ?? null}
+          kickVote={me?.kickVote ?? null}
+          onKick={(playerId) => void startKick(playerId)}
+          onVote={(yes) => void voteKick(yes)}
         />
       ) : null}
       {inThisRoom && room && room.phase !== 'WAITING' ? (
@@ -118,6 +139,9 @@ export function RoomPage() {
                     {player.guessed ? `Guessed +${player.guessPoints ?? 0} · ` : ''}
                     {player.connected ? 'Online' : 'Away'}
                   </p>
+                  {me && player.id !== me.playerId && !player.isDrawer && !room.kick ? (
+                    <button type="button" className="btn-ghost mt-2" onClick={() => void startKick(player.id)}>Kick {player.name}</button>
+                  ) : null}
                 </li>
               ))}
             </ul>
@@ -128,12 +152,34 @@ export function RoomPage() {
                 <p className="text-xs font-semibold uppercase tracking-widest text-ink/50">Round {room.round || 1} / {room.totalRounds}</p>
                 <HintWord hint={room.phase === 'DRAWING' ? room.hint : room.phase === 'WORD_SELECTION' ? 'Choosing a word' : room.roundResult?.word ?? ' '} />
               </div>
-              <TimerBadge
-                label={room.phase === 'WORD_SELECTION' ? 'Choose' : room.phase === 'ROUND_RESULTS' ? 'Next' : 'Time'}
-                endsAt={room.selectionEndsAt ?? room.drawEndsAt ?? room.resultsEndsAt}
-                serverNow={room.serverNow}
-              />
+              <div className="flex flex-wrap items-center gap-2">
+                {me?.canEndGame ? (
+                  <button
+                    type="button"
+                    className="btn-ghost"
+                    onClick={() => {
+                      if (window.confirm('End the game for everyone?')) void endGame()
+                    }}
+                  >
+                    End game
+                  </button>
+                ) : null}
+                <TimerBadge
+                  label={room.phase === 'WORD_SELECTION' ? 'Choose' : room.phase === 'ROUND_RESULTS' ? 'Next' : 'Time'}
+                  endsAt={room.selectionEndsAt ?? room.drawEndsAt ?? room.resultsEndsAt}
+                  serverNow={room.serverNow}
+                />
+              </div>
             </div>
+            {room.kick ? (
+              <KickPoll
+                kick={room.kick}
+                serverNow={room.serverNow}
+                canVote={Boolean(me && me.playerId !== room.kick.targetId && me.kickVote === null)}
+                isTarget={me?.playerId === room.kick.targetId}
+                onVote={(yes) => void voteKick(yes)}
+              />
+            ) : null}
             {me?.secretWord ? <p className="rounded-2xl bg-gold/30 px-4 py-2 font-bold text-ink">Your word: {me.secretWord}</p> : null}
             {me?.wordChoices ? (
               <div className="grid gap-2 sm:grid-cols-3" aria-label="Word choices">
@@ -187,7 +233,7 @@ export function RoomPage() {
                   setCloseNotice(true)
                   window.setTimeout(() => setCloseNotice(false), 1200)
                 }
-                if (!ack.ok) setError(ack.error ?? 'Message was not sent')
+                if (!ack.ok) dispatch(setError(ack.error ?? 'Message was not sent'))
               })
             }}
           />

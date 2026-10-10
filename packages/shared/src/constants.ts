@@ -42,7 +42,13 @@ export const RATE = {
   clear: { limit: 4, windowMs: 10_000 },
   word: { limit: 4, windowMs: 10_000 },
   sync: { limit: 4, windowMs: 2_000 },
+  kick: { limit: 4, windowMs: 30_000 },
+  vote: { limit: 8, windowMs: 10_000 },
+  end: { limit: 4, windowMs: 30_000 },
+  leave: { limit: 6, windowMs: 30_000 },
 } as const
+
+export const KICK_VOTE_MS = 20_000
 
 export const HINT_FRACTIONS = [0.3, 0.55, 0.8] as const
 

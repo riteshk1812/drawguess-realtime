@@ -36,6 +36,10 @@ const turnSchema = z.object({
   turnId: z.string().regex(/^[a-f0-9]{8,64}$/),
 })
 const settingsSchema = z.object({ settings: z.unknown() })
+const kickSchema = z.object({
+  targetId: z.string().regex(/^[a-f0-9]{16,64}$/),
+})
+const voteSchema = z.object({ yes: z.boolean() })
 
 export function registerSockets(io: Server, manager: RoomManager, logger: Logger): void {
   io.on('connection', (socket) => {
@@ -113,6 +117,30 @@ export function registerSockets(io: Server, manager: RoomManager, logger: Logger
         const parsed = turnSchema.safeParse(payload)
         if (!parsed.success) return invalid(parsed.error)
         return manager.clear(socket.id, parsed.data.turnId)
+      })
+    })
+
+    socket.on('game:end', (_payload, ack) => {
+      void handle(socket, ack, logger, () => manager.endGame(socket.id))
+    })
+
+    socket.on('room:leave', (_payload, ack) => {
+      void handle(socket, ack, logger, () => manager.leave(socket.id))
+    })
+
+    socket.on('kick:start', (payload, ack) => {
+      void handle(socket, ack, logger, async () => {
+        const parsed = kickSchema.safeParse(payload)
+        if (!parsed.success) return invalid(parsed.error)
+        return manager.startKick(socket.id, parsed.data.targetId)
+      })
+    })
+
+    socket.on('kick:vote', (payload, ack) => {
+      void handle(socket, ack, logger, async () => {
+        const parsed = voteSchema.safeParse(payload)
+        if (!parsed.success) return invalid(parsed.error)
+        return manager.voteKick(socket.id, parsed.data.yes)
       })
     })
 

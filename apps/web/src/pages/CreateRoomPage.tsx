@@ -2,13 +2,13 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { LIMITS, type WordListId } from '@drawguess/shared'
 import { createRoom } from '../services/socket'
-import { useGameStore } from '../stores/gameStore'
+import { useAppSelector } from '../stores/gameStore'
 
 const LISTS: WordListId[] = ['mixed', 'animals', 'food', 'objects', 'custom']
 
 export function CreateRoomPage() {
   const navigate = useNavigate()
-  const playerName = useGameStore((state) => state.playerName)
+  const playerName = useAppSelector((state) => state.game.playerName)
   const [roomName, setRoomName] = useState('Friday night')
   const [rounds, setRounds] = useState(3)
   const [drawDurationSec, setDrawDurationSec] = useState(80)

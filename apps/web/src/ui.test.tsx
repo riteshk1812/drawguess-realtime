@@ -1,5 +1,7 @@
-import { render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import type { ReactElement } from 'react'
+import { Provider } from 'react-redux'
 import { MemoryRouter } from 'react-router-dom'
 import type { PublicRoomState } from '@drawguess/shared'
 import { ConnectionBanner } from './components/ConnectionBanner'
@@ -12,7 +14,11 @@ import { Leaderboard } from './features/leaderboard/Leaderboard'
 import { LobbyView } from './features/lobby/LobbyView'
 import { CreateRoomPage } from './pages/CreateRoomPage'
 import { LandingPage } from './pages/LandingPage'
-import { useGameStore } from './stores/gameStore'
+import { setPlayerName, store } from './stores/gameStore'
+
+function renderWithStore(ui: ReactElement) {
+  return render(<Provider store={store}>{ui}</Provider>)
+}
 
 vi.mock('./services/socket', () => ({
   createRoom: vi.fn(),
@@ -48,19 +54,20 @@ const room: PublicRoomState = {
   archives: [],
   systemMessage: null,
   connectedCount: 1,
+  kick: null,
 }
 
 describe('interface', () => {
   it('validates the landing form', async () => {
-    useGameStore.setState({ playerName: '' })
-    render(<MemoryRouter><LandingPage /></MemoryRouter>)
+    store.dispatch(setPlayerName(''))
+    renderWithStore(<MemoryRouter><LandingPage /></MemoryRouter>)
     await userEvent.click(screen.getByRole('button', { name: 'Join room' }))
     expect(screen.getByRole('alert')).toHaveTextContent(/name/i)
   })
 
   it('renders the create-room settings', () => {
-    useGameStore.setState({ playerName: 'Ada' })
-    render(<MemoryRouter><CreateRoomPage /></MemoryRouter>)
+    store.dispatch(setPlayerName('Ada'))
+    renderWithStore(<MemoryRouter><CreateRoomPage /></MemoryRouter>)
     expect(screen.getByLabelText('Rounds')).toBeInTheDocument()
     expect(screen.getByLabelText('Draw seconds')).toBeInTheDocument()
     expect(screen.getByLabelText('Word list')).toBeInTheDocument()
@@ -70,8 +77,22 @@ describe('interface', () => {
     const onStart = vi.fn()
     render(<LobbyView room={room} isHost canStart={false} onStart={onStart} onCopy={vi.fn()} copied={false} />)
     expect(screen.getByText('ABCD2345')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /waiting for at least two/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Waiting for at least 2 players' })).toBeDisabled()
     expect(screen.getByText('Reconnecting')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Kick Bea' })).not.toBeInTheDocument()
+  })
+
+  it('offers a kick vote for someone who is not drawing', async () => {
+    const onKick = vi.fn()
+    render(<LobbyView room={room} isHost canStart={false} onStart={vi.fn()} onCopy={vi.fn()} copied={false} selfId="host" onKick={onKick} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Kick Bea' }))
+    expect(onKick).toHaveBeenCalledWith('bea')
+  })
+
+  it('asks a two-seat room to wait for one more player', () => {
+    const twoSeats = { ...room, settings: { ...room.settings, capacity: 2 } }
+    render(<LobbyView room={twoSeats} isHost canStart={false} onStart={vi.fn()} onCopy={vi.fn()} copied={false} />)
+    expect(screen.getByRole('button', { name: 'Waiting for at least 1 players' })).toBeDisabled()
   })
 
   it('renders drawing tools, chat, timer, hint, leaderboard, and replay controls', async () => {
@@ -86,8 +107,16 @@ describe('interface', () => {
     await userEvent.type(screen.getByLabelText('Message'), 'cat{enter}')
     expect(onSend).toHaveBeenCalledWith('cat')
 
-    render(<TimerBadge endsAt={Date.now() + 20_000} serverNow={Date.now()} label="Time" />)
-    expect(screen.getByLabelText(/Time/)).toBeInTheDocument()
+    vi.useFakeTimers()
+    const start = new Date('2026-10-10T00:00:00.000Z').getTime()
+    vi.setSystemTime(start)
+    render(<TimerBadge endsAt={start + 20_000} serverNow={start} label="Time" />)
+    expect(screen.getByLabelText('Time 20 seconds')).toBeInTheDocument()
+    act(() => {
+      vi.advanceTimersByTime(1000)
+    })
+    expect(screen.getByLabelText('Time 19 seconds')).toBeInTheDocument()
+    vi.useRealTimers()
     render(<HintWord hint="_ _ t" />)
     expect(screen.getByLabelText('Hint _ _ t')).toBeInTheDocument()
     render(<ConnectionBanner connection="disconnected" error={null} />)

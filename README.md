@@ -51,7 +51,7 @@ SIGINT and SIGTERM emit `server:shutdown` and close HTTP, Socket.IO, Redis, and 
 ```mermaid
 flowchart LR
   subgraph browser [Browser]
-    UI[React + Zustand]
+    UI[React + Redux Toolkit]
     Canvas[Canvas 800x500]
   end
   subgraph node [One Node process]
@@ -68,7 +68,7 @@ flowchart LR
   Rooms -.-> Postgres
 ```
 
-`packages/shared` holds types, Zod settings, scoring, hints, word lists, and the raster. The web app and the server both import it, so a fill on the client matches a fill in replay. `apps/server` is Express plus Socket.IO. `apps/web` is Vite, React, TypeScript, Tailwind, and Zustand.
+`packages/shared` holds types, Zod settings, scoring, hints, word lists, and the raster. The web app and the server both import it, so a fill on the client matches a fill in replay. `apps/server` is Express plus Socket.IO. `apps/web` is Vite, React, TypeScript, Tailwind, and Redux Toolkit.
 
 The server keeps authoritative rooms in memory. It broadcasts `room:state` to the room and `player:private` only to that player's socket. Public state never includes the secret, the three word choices, or the custom word list.
 

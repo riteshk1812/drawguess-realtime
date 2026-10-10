@@ -1,12 +1,12 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { normalizePlayerName } from '@drawguess/shared'
-import { useGameStore } from '../stores/gameStore'
+import { setPlayerName, useAppDispatch, useAppSelector } from '../stores/gameStore'
 
 export function LandingPage() {
   const navigate = useNavigate()
-  const playerName = useGameStore((state) => state.playerName)
-  const setPlayerName = useGameStore((state) => state.setPlayerName)
+  const dispatch = useAppDispatch()
+  const playerName = useAppSelector((state) => state.game.playerName)
   const [code, setCode] = useState('')
   const [error, setError] = useState<string | null>(null)
 
@@ -16,7 +16,7 @@ export function LandingPage() {
       setError('Enter a name using 1–16 letters, numbers, or spaces.')
       return null
     }
-    setPlayerName(name)
+    dispatch(setPlayerName(name))
     setError(null)
     return name
   }
@@ -48,7 +48,7 @@ export function LandingPage() {
       >
         <label className="grid gap-2 text-sm font-semibold" htmlFor="name">
           Your name
-          <input id="name" className="field" value={playerName} maxLength={16} onChange={(event) => setPlayerName(event.target.value)} placeholder="Ada" />
+          <input id="name" className="field" value={playerName} maxLength={16} onChange={(event) => dispatch(setPlayerName(event.target.value))} placeholder="Ada" />
         </label>
         <label className="grid gap-2 text-sm font-semibold" htmlFor="code">
           Room code
