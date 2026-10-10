@@ -1,5 +1,4 @@
 import type { PublicRoomState } from '@drawguess/shared'
-import { KickPoll } from '../players/KickPoll'
 
 export function LobbyView({
   room,
@@ -8,10 +7,6 @@ export function LobbyView({
   onStart,
   onCopy,
   copied,
-  selfId = null,
-  kickVote = null,
-  onKick,
-  onVote,
 }: {
   room: PublicRoomState
   isHost: boolean
@@ -19,10 +14,6 @@ export function LobbyView({
   onStart: () => void
   onCopy: () => void
   copied: boolean
-  selfId?: string | null
-  kickVote?: 'yes' | 'no' | null
-  onKick?: (playerId: string) => void
-  onVote?: (yes: boolean) => void
 }) {
   const link = `${window.location.origin}/room/${room.code}`
   return (
@@ -55,24 +46,10 @@ export function LobbyView({
             <span className="font-semibold">
               {player.name} {player.isHost ? '· host' : ''}
             </span>
-            <span className="flex items-center gap-2">
-              {onKick && selfId && player.id !== selfId && !player.isDrawer && !room.kick ? (
-                <button type="button" className="btn-ghost" onClick={() => onKick(player.id)}>Kick {player.name}</button>
-              ) : null}
-              <span className={player.connected ? 'text-teal' : 'text-coral'}>{player.connected ? 'Connected' : 'Reconnecting'}</span>
-            </span>
+            <span className={player.connected ? 'text-teal' : 'text-coral'}>{player.connected ? 'Connected' : 'Reconnecting'}</span>
           </li>
         ))}
       </ul>
-      {room.kick && onVote ? (
-        <KickPoll
-          kick={room.kick}
-          serverNow={room.serverNow}
-          canVote={Boolean(selfId && selfId !== room.kick.targetId && kickVote === null)}
-          isTarget={selfId === room.kick.targetId}
-          onVote={onVote}
-        />
-      ) : null}
       {isHost ? (
         <button className="btn-primary" type="button" onClick={onStart} disabled={!canStart}>
           {canStart ? 'Start game' : waitingLabel(room.settings.capacity)}

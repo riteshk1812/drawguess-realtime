@@ -116,14 +116,6 @@ export async function leaveRoom(): Promise<Ack> {
   return ack
 }
 
-export async function startKick(targetId: string): Promise<Ack> {
-  return take(await emit<Ack>('kick:start', { targetId }))
-}
-
-export async function voteKick(yes: boolean): Promise<Ack> {
-  return take(await emit<Ack>('kick:vote', { yes }))
-}
-
 export async function requestSync(): Promise<Ack> {
   return take(await emit<Ack>('sync:request', {}))
 }
@@ -174,11 +166,6 @@ function wire(): void {
     clearSession()
     store.dispatch(resetRoom())
     store.dispatch(setError(payload.error ?? 'Connected somewhere else'))
-  })
-  socket.on('room:kicked', (payload: { error?: string }) => {
-    clearSession()
-    store.dispatch(resetRoom())
-    store.dispatch(setError(payload.error ?? 'You were kicked from the room'))
   })
   socket.on('server:shutdown', () => {
     store.dispatch(setError('The server is shutting down. Rejoin in a moment.'))

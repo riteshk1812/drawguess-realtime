@@ -138,15 +138,6 @@ export interface ArchivedRound {
   events: ReplayEvent[]
 }
 
-export interface KickPollView {
-  targetId: string
-  targetName: string
-  yes: number
-  no: number
-  eligible: number
-  endsAt: number
-}
-
 export interface PublicRoomState {
   id: string
   code: string
@@ -172,7 +163,6 @@ export interface PublicRoomState {
   archives: ArchivedRound[]
   systemMessage: string | null
   connectedCount: number
-  kick: KickPollView | null
 }
 
 export interface PrivateView {
@@ -185,7 +175,6 @@ export interface PrivateView {
   canConfigure: boolean
   canReturnToLobby: boolean
   canEndGame: boolean
-  kickVote: 'yes' | 'no' | null
   secretWord: string | null
   wordChoices: WordChoice[] | null
   customWords: string[]

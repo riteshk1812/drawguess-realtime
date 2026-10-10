@@ -54,7 +54,6 @@ const room: PublicRoomState = {
   archives: [],
   systemMessage: null,
   connectedCount: 1,
-  kick: null,
 }
 
 describe('interface', () => {
@@ -80,13 +79,6 @@ describe('interface', () => {
     expect(screen.getByRole('button', { name: 'Waiting for at least 2 players' })).toBeDisabled()
     expect(screen.getByText('Reconnecting')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Kick Bea' })).not.toBeInTheDocument()
-  })
-
-  it('offers a kick vote for someone who is not drawing', async () => {
-    const onKick = vi.fn()
-    render(<LobbyView room={room} isHost canStart={false} onStart={vi.fn()} onCopy={vi.fn()} copied={false} selfId="host" onKick={onKick} />)
-    await userEvent.click(screen.getByRole('button', { name: 'Kick Bea' }))
-    expect(onKick).toHaveBeenCalledWith('bea')
   })
 
   it('asks a two-seat room to wait for one more player', () => {

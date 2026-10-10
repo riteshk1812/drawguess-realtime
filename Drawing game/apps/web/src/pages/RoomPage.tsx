@@ -10,8 +10,7 @@ import { ReplayPlayer } from '../features/drawing/ReplayPlayer'
 import { Toolbar } from '../features/drawing/Toolbar'
 import { Leaderboard } from '../features/leaderboard/Leaderboard'
 import { LobbyView } from '../features/lobby/LobbyView'
-import { KickPoll } from '../features/players/KickPoll'
-import { clearDraw, endGame, joinRoom, leaveRoom, returnToLobby, selectWord, sendText, startGame, startKick, undoDraw, voteKick, watchRoom } from '../services/socket'
+import { clearDraw, endGame, joinRoom, leaveRoom, returnToLobby, selectWord, sendText, startGame, undoDraw, watchRoom } from '../services/socket'
 import { loadSession } from '../services/session'
 import { setError, setPlayerName, useAppDispatch, useAppSelector } from '../stores/gameStore'
 
@@ -116,10 +115,6 @@ export function RoomPage() {
             })
           }}
           onStart={() => void startGame()}
-          selfId={me?.playerId ?? null}
-          kickVote={me?.kickVote ?? null}
-          onKick={(playerId) => void startKick(playerId)}
-          onVote={(yes) => void voteKick(yes)}
         />
       ) : null}
       {inThisRoom && room && room.phase !== 'WAITING' ? (
@@ -139,9 +134,6 @@ export function RoomPage() {
                     {player.guessed ? `Guessed +${player.guessPoints ?? 0} · ` : ''}
                     {player.connected ? 'Online' : 'Away'}
                   </p>
-                  {me && player.id !== me.playerId && !player.isDrawer && !room.kick ? (
-                    <button type="button" className="btn-ghost mt-2" onClick={() => void startKick(player.id)}>Kick {player.name}</button>
-                  ) : null}
                 </li>
               ))}
             </ul>
@@ -171,15 +163,6 @@ export function RoomPage() {
                 />
               </div>
             </div>
-            {room.kick ? (
-              <KickPoll
-                kick={room.kick}
-                serverNow={room.serverNow}
-                canVote={Boolean(me && me.playerId !== room.kick.targetId && me.kickVote === null)}
-                isTarget={me?.playerId === room.kick.targetId}
-                onVote={(yes) => void voteKick(yes)}
-              />
-            ) : null}
             {me?.secretWord ? <p className="rounded-2xl bg-gold/30 px-4 py-2 font-bold text-ink">Your word: {me.secretWord}</p> : null}
             {me?.wordChoices ? (
               <div className="grid gap-2 sm:grid-cols-3" aria-label="Word choices">

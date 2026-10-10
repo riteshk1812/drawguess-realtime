@@ -223,30 +223,6 @@ export class RoomManager {
     return { ok: true }
   }
 
-  async startKick(socketId: string, targetId: string): Promise<ClientResponse> {
-    const bound = this.require(socketId)
-    if (!bound.ok) return bound.response
-    if (!(await this.limiter.allow(`kick:${bound.playerId}`, RATE.kick.limit, RATE.kick.windowMs))) {
-      return { ok: false, code: 'rate', error: 'Slow down a moment' }
-    }
-    const result = bound.room.startKick(bound.playerId, targetId, this.now())
-    if (!result.ok) return { ok: false, code: result.code, error: result.error }
-    this.after(bound.room)
-    return this.accepted(bound.room, bound.playerId)
-  }
-
-  async voteKick(socketId: string, yes: boolean): Promise<ClientResponse> {
-    const bound = this.require(socketId)
-    if (!bound.ok) return bound.response
-    if (!(await this.limiter.allow(`vote:${bound.playerId}`, RATE.vote.limit, RATE.vote.windowMs))) {
-      return { ok: false, code: 'rate', error: 'Slow down a moment' }
-    }
-    const result = bound.room.voteKick(bound.playerId, yes, this.now())
-    if (!result.ok) return { ok: false, code: result.code, error: result.error }
-    this.after(bound.room)
-    return this.accepted(bound.room, bound.playerId)
-  }
-
   async returnToLobby(socketId: string): Promise<ClientResponse> {
     const bound = this.require(socketId)
     if (!bound.ok) return bound.response
@@ -361,13 +337,11 @@ export class RoomManager {
   }
 
   private after(room: GameRoom): void {
-    for (const playerId of room.drainKicked()) this.eject(room.id, playerId)
     if (room.playerCount === 0) {
       this.deleteRoom(room)
       return
     }
     room.catchUp(this.now())
-    for (const playerId of room.drainKicked()) this.eject(room.id, playerId)
     if (room.playerCount === 0) {
       this.deleteRoom(room)
       return
@@ -440,17 +414,6 @@ export class RoomManager {
       this.savedHistory.delete(record.id)
       this.logger.warn({ err: error instanceof Error ? error.message : 'history' }, 'history save failed')
     }
-  }
-
-  private eject(roomId: string, playerId: string): void {
-    const key = playerKey(roomId, playerId)
-    const socketId = this.playerSockets.get(key)
-    if (!socketId) return
-    this.playerSockets.delete(key)
-    this.sockets.delete(socketId)
-    const socket = this.io.sockets.sockets.get(socketId)
-    socket?.emit('room:kicked', { error: 'You were kicked from the room' })
-    socket?.disconnect(true)
   }
 
   private accepted(room: GameRoom, playerId: string, session?: ClientResponse['session']): ClientResponse {

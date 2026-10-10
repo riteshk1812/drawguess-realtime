@@ -6,7 +6,6 @@ import {
   drawerPoints,
   guesserPoints,
   isCloseGuess,
-  KICK_VOTE_MS,
   maskWord,
   nextHintAt,
   normalizePlayerName,
@@ -103,13 +102,6 @@ export interface RoomSnapshot {
   graceMs: number
   finishedAt: number | null
   historyId: string | null
-  kick: KickPoll | null
-}
-
-interface KickPoll {
-  targetId: string
-  endsAt: number
-  votes: { playerId: string; yes: boolean }[]
 }
 
 export type GameResult<T> = { ok: true; data: T } | { ok: false; code: string; error: string }
@@ -131,7 +123,7 @@ export interface CompletedGame {
   settings: PublicSettings
 }
 
-type WakeKind = 'select' | 'hint' | 'draw' | 'results' | 'drawer_hold' | 'kick'
+type WakeKind = 'select' | 'hint' | 'draw' | 'results' | 'drawer_hold'
 
 const ok = <T>(data: T): GameResult<T> => ({ ok: true, data })
 const fail = (code: string, error: string): GameResult<never> => ({ ok: false, code, error })
@@ -156,8 +148,6 @@ export class GameRoom {
   private usedWords: string[] = []
   private finishedAt: number | null = null
   private historyId: string | null = null
-  private kick: KickPoll | null = null
-  private kickedIds: string[] = []
   private readonly deps: RoomDeps
 
   private constructor(snapshot: RoomSnapshot, deps: RoomDeps) {
@@ -181,7 +171,6 @@ export class GameRoom {
     this.usedWords = snapshot.usedWords
     this.finishedAt = snapshot.finishedAt
     this.historyId = snapshot.historyId
-    this.kick = snapshot.kick ?? null
   }
 
   static create(input: {
@@ -229,7 +218,6 @@ export class GameRoom {
       graceMs: input.deps.graceMs,
       finishedAt: null,
       historyId: null,
-      kick: null,
     }
     const room = new GameRoom(snapshot, input.deps)
     room.pushSystem(`${hostName} created the room.`)
@@ -239,12 +227,6 @@ export class GameRoom {
   static fromSnapshot(snapshot: RoomSnapshot, deps: RoomDeps): GameRoom {
     if (snapshot.version !== 1) throw new Error('Unsupported room snapshot')
     return new GameRoom(snapshot, deps)
-  }
-
-  drainKicked(): string[] {
-    const ids = this.kickedIds
-    this.kickedIds = []
-    return ids
   }
 
   get playerCount(): number {
@@ -359,7 +341,6 @@ export class GameRoom {
     this.usedWords = []
     this.finishedAt = null
     this.historyId = null
-    this.kick = null
     this.chat = []
     this.buildSchedule()
     this.turnIndex = 0
@@ -484,7 +465,6 @@ export class GameRoom {
     this.usedWords = []
     this.finishedAt = null
     this.historyId = null
-    this.kick = null
     this.chat = []
     this.systemMessage = 'Back in the lobby. Scores were reset.'
     this.pushSystem('Back in the lobby. Scores were reset.')
@@ -502,7 +482,6 @@ export class GameRoom {
         if (guesser) guesser.score = Math.max(0, guesser.score - guess.points)
       }
     }
-    this.kick = null
     this.turn = null
     this.pushSystem(`${player.name} ended the game.`)
     this.finishGame(now)
@@ -516,38 +495,8 @@ export class GameRoom {
     return ok(null)
   }
 
-  startKick(actorId: string, targetId: string, now: number): GameResult<{ kickedId: string | null }> {
-    const actor = this.player(actorId)
-    if (!actor?.connected) return fail('forbidden', 'You are not connected')
-    const target = this.player(targetId)
-    if (!target) return fail('not_found', 'That player is not in the room')
-    if (target.id === actor.id) return fail('invalid', 'You cannot kick yourself')
-    if (this.isCurrentDrawer(target.id)) return fail('forbidden', 'You cannot kick the player who is drawing')
-    if (this.kick) return fail('phase', 'A kick vote is already open')
-    const eligible = this.players.filter((player) => player.connected && player.id !== target.id)
-    if (eligible.length < 1) return fail('invalid', 'Nobody else can vote')
-    this.kick = { targetId: target.id, endsAt: now + KICK_VOTE_MS, votes: [{ playerId: actor.id, yes: true }] }
-    this.pushSystem(`${actor.name} called a vote to kick ${target.name}.`)
-    return ok({ kickedId: this.settleKick(now) })
-  }
-
-  voteKick(playerId: string, yes: boolean, now: number): GameResult<{ kickedId: string | null }> {
-    const poll = this.kick
-    if (!poll) return fail('phase', 'There is no kick vote')
-    if (playerId === poll.targetId) return fail('forbidden', 'You cannot vote on your own kick')
-    const player = this.player(playerId)
-    if (!player?.connected) return fail('forbidden', 'You are not connected')
-    if (poll.votes.some((vote) => vote.playerId === playerId)) return fail('invalid', 'You already voted')
-    poll.votes.push({ playerId, yes })
-    return ok({ kickedId: this.settleKick(now) })
-  }
-
   nextWake(now: number): { at: number; kind: WakeKind } | null {
-    const scheduled = this.scheduledWake(now)
-    if (this.kick && (scheduled === null || this.kick.endsAt <= scheduled.at)) {
-      return { at: this.kick.endsAt, kind: 'kick' }
-    }
-    return scheduled
+    return this.scheduledWake(now)
   }
 
   private scheduledWake(_now: number): { at: number; kind: WakeKind } | null {
@@ -612,7 +561,6 @@ export class GameRoom {
       graceMs: this.deps.graceMs,
       finishedAt: this.finishedAt,
       historyId: this.historyId,
-      kick: this.kick ? structuredClone(this.kick) : null,
     }
   }
 
@@ -670,7 +618,6 @@ export class GameRoom {
       archives: this.archives.map((round) => structuredClone(round)),
       systemMessage: this.systemMessage,
       connectedCount: this.connectedCount(),
-      kick: this.kickView(),
     }
   }
 
@@ -688,11 +635,6 @@ export class GameRoom {
       canConfigure: Boolean(playerId === this.hostId && this.phase === 'WAITING'),
       canReturnToLobby: Boolean(playerId === this.hostId && (this.phase === 'GAME_RESULTS' || this.phase === 'WAITING')),
       canEndGame: Boolean(player?.connected && playerId === this.hostId && this.phase !== 'WAITING' && this.phase !== 'GAME_RESULTS'),
-      kickVote: this.kick?.votes.find((vote) => vote.playerId === playerId)?.yes === true
-        ? 'yes'
-        : this.kick?.votes.find((vote) => vote.playerId === playerId)?.yes === false
-          ? 'no'
-          : null,
       secretWord: this.phase === 'DRAWING' && isDrawer ? this.turn?.secret ?? null : null,
       wordChoices: this.phase === 'WORD_SELECTION' && isDrawer ? this.turn?.choices ?? null : null,
       customWords: this.phase === 'WAITING' && playerId === this.hostId ? [...this.settings.customWords] : [],
@@ -741,11 +683,6 @@ export class GameRoom {
   }
 
   private wake(now: number, kind: WakeKind): boolean {
-    if (kind === 'kick') {
-      if (!this.kick || now < this.kick.endsAt) return false
-      this.settleKick(now)
-      return true
-    }
     const turn = this.turn
     if (!turn) return false
     if (kind === 'select') {
@@ -983,7 +920,6 @@ export class GameRoom {
   private removePlayer(playerId: string, now: number, reason?: string): void {
     const player = this.player(playerId)
     if (!player) return
-    if (this.kick?.targetId === playerId) this.kick = null
     this.players = this.players.filter((item) => item.id !== playerId)
     if (this.turn) this.turn.eligibleIds = this.turn.eligibleIds.filter((id) => id !== playerId)
     if (this.hostId === playerId) {
@@ -1001,56 +937,6 @@ export class GameRoom {
       return
     }
     if (this.phase === 'DRAWING' && this.turn && this.allConnectedGuessed()) this.endDrawing(now, 'all_guessed')
-  }
-
-  private isCurrentDrawer(playerId: string): boolean {
-    return Boolean(this.turn && this.turn.drawerId === playerId && (this.phase === 'DRAWING' || this.phase === 'WORD_SELECTION'))
-  }
-
-  private settleKick(now: number): string | null {
-    const poll = this.kick
-    if (!poll) return null
-    const tally = this.tallyKick(poll)
-    const won = tally.eligible > 0 && tally.yes * 2 > tally.eligible
-    const closed = won || tally.yes + tally.no >= tally.eligible || now >= poll.endsAt
-    if (!closed) return null
-    const target = this.player(poll.targetId)
-    this.kick = null
-    if (won && target) {
-      this.kickedIds.push(target.id)
-      this.removePlayer(target.id, now, `${target.name} was kicked.`)
-      return target.id
-    }
-    this.pushSystem(target ? `The vote to kick ${target.name} failed.` : 'The kick vote ended.')
-    return null
-  }
-
-  private tallyKick(poll: KickPoll): { yes: number; no: number; eligible: number } {
-    const eligible = new Set(this.players.filter((player) => player.connected && player.id !== poll.targetId).map((player) => player.id))
-    let yes = 0
-    let no = 0
-    for (const vote of poll.votes) {
-      if (!eligible.has(vote.playerId)) continue
-      if (vote.yes) yes += 1
-      else no += 1
-    }
-    return { yes, no, eligible: eligible.size }
-  }
-
-  private kickView() {
-    const poll = this.kick
-    if (!poll) return null
-    const target = this.player(poll.targetId)
-    if (!target) return null
-    const tally = this.tallyKick(poll)
-    return {
-      targetId: target.id,
-      targetName: target.name,
-      yes: tally.yes,
-      no: tally.no,
-      eligible: tally.eligible,
-      endsAt: poll.endsAt,
-    }
   }
 
   private pickHost(except?: string): string | null {
